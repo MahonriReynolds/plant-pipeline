@@ -11,6 +11,8 @@ CREATE TABLE readings (
                        AND datetime(ts) IS NOT NULL
                    ),
 
+    plant          INTEGER CHECK (plant >= 0),
+
     -- measurements
     lux            REAL    CHECK (lux >= 0),
     rh             REAL    CHECK (rh BETWEEN 0 AND 100),

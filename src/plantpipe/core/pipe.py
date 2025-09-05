@@ -1,47 +1,58 @@
 
 
 
-from datetime import datetime, timezone
+import time
 from pathlib import Path
 
 from plantpipe.storage.database import ReadingsDBWrapper
+from plantpipe.input.serial_ingestor import ProbeReader
 
-# Paths
+
+# tmp config
 db_path = Path("data/readings.db")
 schema_path = Path("sql/001_init.sql")
+port = "/dev/ttyUSB0"
+baud = 115200
 
-# Make sure the data folder exists
-db_path.parent.mkdir(parents=True, exist_ok=True)
 
-# Create DB wrapper
+# create DB wrapper
 db = ReadingsDBWrapper(str(db_path), str(schema_path))
+# create probe reader
+reader = ProbeReader(port, baud)
 
 
-# Test payload
-payload = {
-    "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-    "lux": 123.4,
-    "rh": 41.2,
-    "temp_c": 22.8,
-    "moisture_raw": 480,
-    "moisture_pct": 37.5,
-    "seq": 1,
-    "err": None,
-}
+# run for 10s
+start = time.time()
+
+for payload in reader:
+    print(payload)
+
+    # insert test row
+    success = db.insert_single_reading(payload)
+    print("Insert success:", success)
+
+    # read last row
+    rows = db.get_last_readings(1, oldest_first=True)
+    print("Last reading:", rows)
+
+    print()
+
+    if time.time() - start > 10:
+        break
 
 
-input(payload["ts"])
 
-# Insert test row
-success = db.insert_single_reading(payload)
-print("Insert success:", success)
-
-# Read last row(s)
-rows = db.get_last_readings(1, oldest_first=True)
-print("Last reading:", rows)
-
-# Close connection
+# close connections
+reader.close()
 db.close()
+
+
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,3 @@
-
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -6,7 +5,7 @@ from typing import Any, Dict, Optional, Iterable, List
 
 
 class ReadingsDBWrapper:
-    def __init__(self, path: str, db_schema: str):
+    def __init__(self, path: str, db_schema: str) -> None:
         # load schema file
         schema_path = Path(db_schema)
         if not schema_path.exists():
@@ -23,12 +22,12 @@ class ReadingsDBWrapper:
             self.conn = self.__create_with_schema(self.path)
             return
 
-        # existing DB → exact schema match check
+        # existing DB -> exact schema match check
         if self.__schemas_match(target_path):
             self.path = target_path
             self.conn = self.__connect(self.path)
         else:
-            # mismatch → move old aside, recreate clean at original name
+            # mismatch -> move old aside, recreate clean at original name
             _ = self.__rename_as_backup(target_path)
             self.path = target_path
             self.conn = self.__create_with_schema(self.path)
@@ -116,13 +115,14 @@ class ReadingsDBWrapper:
 
         row = {
             "ts":            ts,
+            "plant":         self.__opt_str(payload.get("plant")),
             "lux":           self.__opt_float(payload.get("lux")),
             "rh":            self.__opt_float(payload.get("rh")),
             "temp_c":        self.__opt_float(payload.get("temp_c")),
             "moisture_raw":  self.__opt_int(payload.get("moisture_raw")),
             "moisture_pct":  self.__opt_float(payload.get("moisture_pct")),
             "seq":           self.__opt_int(payload.get("seq")),
-            "err":           self.__opt_str(payload.get("err")),
+            "err":           self.__opt_str(payload.get("err")) or "",  # force string; empty OK
         }
 
         if not any(row[k] is not None for k in ("lux", "rh", "temp_c", "moisture_raw", "moisture_pct")):
@@ -139,9 +139,9 @@ class ReadingsDBWrapper:
             self.conn.execute(
                 """
                 INSERT INTO readings
-                  (ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
+                  (ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
                 VALUES
-                  (:ts, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
+                  (:ts, :plant, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
                 """,
                 row,
             )
@@ -160,9 +160,9 @@ class ReadingsDBWrapper:
             self.conn.executemany(
                 """
                 INSERT INTO readings
-                  (ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
+                  (ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
                 VALUES
-                  (:ts, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
+                  (:ts, :plant, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
                 """,
                 rows,
             )
@@ -182,7 +182,7 @@ class ReadingsDBWrapper:
         if oldest_first:
             sql = """
                 SELECT * FROM (
-                    SELECT id, ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                    SELECT id, ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
                     FROM readings
                     ORDER BY ts DESC, id DESC
                     LIMIT ?
@@ -191,7 +191,7 @@ class ReadingsDBWrapper:
             """
         else:
             sql = """
-                SELECT id, ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                SELECT id, ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
                 FROM readings
                 ORDER BY ts DESC, id DESC
                 LIMIT ?
@@ -218,11 +218,12 @@ class ReadingsDBWrapper:
         if seconds <= 0 or not self.__table_exists("readings"):
             return False
         try:
+            # Keep timestamp format consistent with __is_valid_iso_ts
             row = self.conn.execute(
                 """
                 SELECT EXISTS(
                     SELECT 1 FROM readings
-                    WHERE ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
+                    WHERE ts >= strftime('%Y-%m-%d %H:%M:%S', 'now', ?)
                     LIMIT 1
                 )
                 """,

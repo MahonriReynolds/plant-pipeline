@@ -22,7 +22,7 @@ except ImportError as e:
     raise
 
 # Use the shared DB bootstrap (WAL + schema init)
-from plantpipe.storage.database import get_connection, ensure_schema
+from plantpipe.storage.database import get_connection, ensure_schema, ensure_rollups
 
 # Spool/backlog knobs
 SPOOL_ROTATE_BYTES = 200 * 1024 * 1024  # rotate at 200MB
@@ -208,6 +208,7 @@ def main():
     db_path = pathlib.Path(args.db).resolve()
     conn = get_connection(db_path)
     ensure_schema(conn)
+    ensure_rollups(conn)
     ensure_aux_tables(conn)
 
     # Optional spool

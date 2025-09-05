@@ -90,7 +90,7 @@ class ReadingsDBWrapper:
         if not isinstance(ts, str):
             return False
         try:
-            datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
             return True
         except ValueError:
             return False

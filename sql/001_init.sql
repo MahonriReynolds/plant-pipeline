@@ -3,11 +3,11 @@
 CREATE TABLE readings (
     id             INTEGER PRIMARY KEY,  -- rowid alias
 
-    -- ISO-8601 UTC timestamp to the second: "YYYY-MM-DDTHH:MM:SS"
+    -- ISO-8601 UTC timestamp to the second: "YYYY-MM-DD HH:MM:SS"
     ts             TEXT NOT NULL
                    CHECK (
                        length(ts) = 19
-                       AND ts GLOB '????-??-??T??:??:??'
+                       AND ts GLOB '????-??-?? ??:??:??'
                        AND datetime(ts) IS NOT NULL
                    ),
 

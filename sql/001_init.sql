@@ -1,6 +1,12 @@
--- schema.sql (V1: single sensor)
+-- schema.sql (V1 + unique triple + plant/time index + WAL)
 
-CREATE TABLE readings (
+BEGIN;
+
+-- Enable WAL (persists in the DB file); NORMAL is a good durability/speed tradeoff for WAL.
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+
+CREATE TABLE IF NOT EXISTS readings (
     id             INTEGER PRIMARY KEY,  -- rowid alias
 
     -- ISO-8601 UTC timestamp to the second: "YYYY-MM-DD HH:MM:SS"
@@ -26,5 +32,13 @@ CREATE TABLE readings (
 ) STRICT;
 
 -- fast time queries
-CREATE INDEX idx_readings_ts ON readings(ts);
+CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts);
 
+-- fast plant-over-time queries
+CREATE INDEX IF NOT EXISTS idx_readings_plant_ts ON readings(plant, ts);
+
+-- prevent duplicates for the same (plant, ts, seq)
+-- Note: rows with NULL seq are allowed to repeat (SQLite treats NULLs as distinct)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_readings_plant_ts_seq ON readings(plant, ts, seq);
+
+COMMIT;

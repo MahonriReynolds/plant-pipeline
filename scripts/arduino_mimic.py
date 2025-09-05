@@ -28,10 +28,10 @@ Usage
     #   PTY is /dev/pts/4
 
 # 2. Start the ingestor on one end:
-    python serial_ingestor.py --port /dev/pts/3 --db plant.db --print
+    python serial_ingestor.py --port /dev/pts/3 --db data/plant.db --print
 
 # 3. Start the fake Arduino on the other:
-    python fake_arduino.py --port /dev/pts/4 --interval 2
+    python arduino_mimic.py --port /dev/pts/4 --interval 2
 
 # 4. Observe console output (if --print enabled) and inspect DB:
     sqlite3 plant.db "SELECT * FROM readings LIMIT 5;"

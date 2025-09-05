@@ -1,61 +1,268 @@
-from __future__ import annotations
-import os
+
 import sqlite3
 from pathlib import Path
-from typing import Union
-import time
-
-PathLike = Union[str, Path]
-
-# --- Resolve project root from this file's location ---
-def _project_root() -> Path:
-    # this file: .../src/plantpipe/storage/database.py
-    return Path(__file__).resolve().parents[3]
-
-def _load_sql_text(filename: str) -> str:
-    """
-    Load an .sql file robustly:
-    1) PLANTPIPE_SQL_DIR (if set),
-    2) <repo-root>/sql/,
-    3) <cwd>/sql/ (last resort).
-    """
-    candidates: list[Path] = []
-    env_dir = os.environ.get("PLANTPIPE_SQL_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir))
-    candidates.append(_project_root() / "sql")
-    candidates.append(Path.cwd() / "sql")
-    for base in candidates:
-        p = base / filename
-        if p.exists():
-            return p.read_text(encoding="utf-8")
-    tried = [str((b / filename)) for b in candidates]
-    raise FileNotFoundError(f"Could not find SQL file '{filename}'. Tried: {tried}")
-
-def get_connection(db_path: PathLike) -> sqlite3.Connection:
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    # Wait up to 5s if another process is holding a write lock
-    conn = sqlite3.connect(str(db_path), timeout=5.0)
-    # Ask SQLite itself to wait on busy locks too
-    conn.execute("PRAGMA busy_timeout=5000;")
-    # Set WAL; if another process is racing, retry once after a short sleep
-    try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-    except sqlite3.OperationalError:
-        time.sleep(0.2)
-        conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    return conn
+from datetime import datetime
+from typing import Any, Dict, Optional, Iterable, List
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    # Your 001_init.sql should contain STRICT tables, indices, CHECKs, etc.
-    sql_text = _load_sql_text("001_init.sql")
-    conn.executescript(sql_text)
-    conn.commit()
+class ReadingsDBWrapper:
+    def __init__(self, path: str, db_schema: str):
+        # load schema file
+        schema_path = Path(db_schema)
+        if not schema_path.exists():
+            raise FileNotFoundError(f"Schema file not found: {schema_path}")
+        self._schema_sql = schema_path.read_text(encoding="utf-8")
 
-def ensure_rollups(conn: sqlite3.Connection) -> None:
-    sql_text = _load_sql_text("002_rollups.sql")
-    conn.executescript(sql_text)
-    conn.commit()
+        target_path = Path(path)
+        self.path: Path
+        self.conn: sqlite3.Connection
+
+        if not target_path.exists():
+            # brand new DB
+            self.path = target_path
+            self.conn = self.__create_with_schema(self.path)
+            return
+
+        # existing DB → exact schema match check
+        if self.__schemas_match(target_path):
+            self.path = target_path
+            self.conn = self.__connect(self.path)
+        else:
+            # mismatch → move old aside, recreate clean at original name
+            _ = self.__rename_as_backup(target_path)
+            self.path = target_path
+            self.conn = self.__create_with_schema(self.path)
+
+    # --------------- connection utilities ---------------
+
+    def __connect(self, p: Path) -> sqlite3.Connection:
+        # autocommit; row dicts; FK checks on
+        conn = sqlite3.connect(str(p), isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
+
+    def __create_with_schema(self, p: Path) -> sqlite3.Connection:
+        conn = self.__connect(p)
+        conn.executescript(self._schema_sql)
+        return conn
+
+    # --------------- schema verification ---------------
+
+    def __snapshot(self, conn: sqlite3.Connection):
+        rows = conn.execute("""
+            SELECT type, name, sql
+            FROM sqlite_master
+            WHERE sql IS NOT NULL
+              AND type IN ('table','index','trigger','view')
+        """).fetchall()
+        return {(r[0], r[1]): r[2] for r in rows}
+
+    def __schemas_match(self, db_path: Path) -> bool:
+        # expected schema in-memory
+        mem = sqlite3.connect(":memory:")
+        mem.executescript(self._schema_sql)
+        expected = self.__snapshot(mem)
+        mem.close()
+
+        # actual on-disk
+        conn = sqlite3.connect(str(db_path))
+        actual = self.__snapshot(conn)
+        conn.close()
+
+        return expected == actual
+
+    def __rename_as_backup(self, base: Path) -> Path:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = base.with_name(f"{base.stem}_backup_{ts}{base.suffix}")
+        base.rename(backup_path)
+        return backup_path
+
+    # --------------- small helpers ---------------
+
+    def __table_exists(self, name: str) -> bool:
+        cur = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
+        )
+        return cur.fetchone() is not None
+
+    def __is_valid_iso_ts(self, ts: Any) -> bool:
+        if not isinstance(ts, str):
+            return False
+        try:
+            datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+            return True
+        except ValueError:
+            return False
+
+    def __opt_float(self, v: Any) -> Optional[float]:
+        if v is None: return None
+        try: return float(v)
+        except (TypeError, ValueError): raise ValueError(f"Expected float, got {v!r}")
+
+    def __opt_int(self, v: Any) -> Optional[int]:
+        if v is None: return None
+        try: return int(v)
+        except (TypeError, ValueError): raise ValueError(f"Expected int, got {v!r}")
+
+    def __opt_str(self, v: Any) -> Optional[str]:
+        if v is None: return None
+        return str(v)
+
+    def __build_row(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        ts = payload.get("ts")
+        if not self.__is_valid_iso_ts(ts):
+            raise ValueError(f"Invalid timestamp format: {ts!r}")
+
+        row = {
+            "ts":            ts,
+            "lux":           self.__opt_float(payload.get("lux")),
+            "rh":            self.__opt_float(payload.get("rh")),
+            "temp_c":        self.__opt_float(payload.get("temp_c")),
+            "moisture_raw":  self.__opt_int(payload.get("moisture_raw")),
+            "moisture_pct":  self.__opt_float(payload.get("moisture_pct")),
+            "seq":           self.__opt_int(payload.get("seq")),
+            "err":           self.__opt_str(payload.get("err")),
+        }
+
+        if not any(row[k] is not None for k in ("lux", "rh", "temp_c", "moisture_raw", "moisture_pct")):
+            raise ValueError("At least one measurement must be present.")
+        return row
+
+    # --------------- public: inserts ---------------
+
+    def insert_single_reading(self, payload: Dict[str, Any]) -> bool:
+        if not self.__table_exists("readings"):
+            return False
+        try:
+            row = self.__build_row(payload)  # raises on bad payload
+            self.conn.execute(
+                """
+                INSERT INTO readings
+                  (ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
+                VALUES
+                  (:ts, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
+                """,
+                row,
+            )
+            return True  # autocommit persists
+        except Exception:
+            return False
+
+    def insert_batch_readings(self, payloads: Iterable[Dict[str, Any]]) -> bool:
+        if not self.__table_exists("readings"):
+            return False
+        try:
+            rows = [self.__build_row(p) for p in payloads]
+            if not rows:
+                return True
+            self.conn.execute("BEGIN")
+            self.conn.executemany(
+                """
+                INSERT INTO readings
+                  (ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
+                VALUES
+                  (:ts, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
+                """,
+                rows,
+            )
+            self.conn.execute("COMMIT")
+            return True
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            finally:
+                return False
+
+    # --------------- public: reads / health ---------------
+
+    def get_last_readings(self, n: int, oldest_first: bool = False) -> List[Dict[str, Any]]:
+        if not self.__table_exists("readings"):
+            return []
+        if oldest_first:
+            sql = """
+                SELECT * FROM (
+                    SELECT id, ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                    FROM readings
+                    ORDER BY ts DESC, id DESC
+                    LIMIT ?
+                ) sub
+                ORDER BY ts ASC, id ASC
+            """
+        else:
+            sql = """
+                SELECT id, ts, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                FROM readings
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+            """
+        cur = self.conn.execute(sql, (n,))
+        return [dict(row) for row in cur.fetchall()]
+
+    def health_check(self) -> bool:
+        try:
+            if not self.__table_exists("readings"):
+                return False
+            row = self.conn.execute("PRAGMA quick_check").fetchone()
+            return bool(row and row[0] == "ok")
+        except Exception:
+            return False
+
+    def latest_timestamp(self) -> Optional[str]:
+        if not self.__table_exists("readings"):
+            return None
+        row = self.conn.execute("SELECT MAX(ts) FROM readings").fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def updated_within(self, seconds: int) -> bool:
+        if seconds <= 0 or not self.__table_exists("readings"):
+            return False
+        try:
+            row = self.conn.execute(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM readings
+                    WHERE ts >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)
+                    LIMIT 1
+                )
+                """,
+                (f'-{int(seconds)} seconds',),
+            ).fetchone()
+            return bool(row and row[0] == 1)
+        except Exception:
+            return False
+
+    def has_updates_since(self, ts: str) -> bool:
+        if not self.__is_valid_iso_ts(ts) or not self.__table_exists("readings"):
+            return False
+        try:
+            row = self.conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM readings WHERE ts > ? LIMIT 1)", (ts,)
+            ).fetchone()
+            return bool(row and row[0] == 1)
+        except Exception:
+            return False
+
+    def row_count(self) -> int:
+        if not self.__table_exists("readings"):
+            return 0
+        row = self.conn.execute("SELECT COUNT(*) FROM readings").fetchone()
+        return int(row[0]) if row else 0
+
+    # --------------- convenience ---------------
+
+    def connection(self) -> sqlite3.Connection:
+        """Get the live sqlite3.Connection (for advanced/one-off SQL)."""
+        return self.conn
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()

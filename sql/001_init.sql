@@ -2,10 +2,6 @@
 
 BEGIN;
 
--- Enable WAL (persists in the DB file); NORMAL is a good durability/speed tradeoff for WAL.
-PRAGMA journal_mode=WAL;
-PRAGMA synchronous=NORMAL;
-
 CREATE TABLE IF NOT EXISTS readings (
     id             INTEGER PRIMARY KEY,  -- rowid alias
 

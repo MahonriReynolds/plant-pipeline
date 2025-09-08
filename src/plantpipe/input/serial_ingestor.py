@@ -1,171 +1,188 @@
+# src/plantpipe/input/serial_ingestor.py
 
 import json
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 import serial
-from typing import Optional
 from plantpipe.storage.database import PlantDBWrapper
 
 
-
-
-
 class ProbeManager:
-    def __init__(self, db_wrapper: PlantDBWrapper):
-        self.db = db_wrapper
+    """
+    Owns calibration lifecycle (DB-backed), validation, and writing readings.
+    """
 
-    def ensure_probe_has_calibration(self, probe_id: int) -> bool:
-        """
-        Ensure the probe has an active calibration. 
-        Returns True if calibration is found, False if missing and inserted with default values.
-        """
-        # Check if the probe already has an active calibration
-        active_calibration = self.db.get_probe_calibration(probe_id)
+    def __init__(self, db: PlantDBWrapper, defaults: Dict[str, Any]) -> None:
+        self.db = db
+        self.defaults = defaults
+        self._cal_id_cache: Dict[int, int] = {}
 
-        if not active_calibration:
-            print(f"Probe {probe_id} does not have an active calibration. Inserting hardcoded default values.")
-            
-            # If no calibration found, return False to indicate that we need to add a default one
-            return False
-        
-        return True  # Calibration exists, return True
+    # ---------- calibration ----------
 
-    def calculate_moisture_pct(self, probe_id: int, moisture_raw: int) -> Optional[float]:
-        """
-        Calculate the moisture percentage using the calibration data for the probe.
-        """
-        # Get the active calibration data
-        calibration_query = """
-        SELECT raw_dry, raw_wet FROM probe_calibrations
-        WHERE probe_id = ? AND active = 1
-        """
-        calibration = self.db.conn.execute(calibration_query, (probe_id,)).fetchone()
+    def get_active_calibration_id(self, probe_id: int) -> Optional[int]:
+        cal_id = self._cal_id_cache.get(probe_id)
+        if cal_id is not None:
+            return cal_id
+        cal_id = self.db.get_active_calibration_id(probe_id)
+        if cal_id is not None:
+            self._cal_id_cache[probe_id] = cal_id
+        return cal_id
 
-        if calibration:
-            raw_dry, raw_wet = calibration
+    def ensure_active_calibration(self, probe_id: int) -> int:
+        cal_id = self.get_active_calibration_id(probe_id)
+        if cal_id is not None:
+            return cal_id
+        cal_id = self.db.upsert_active_calibration_from_defaults(probe_id, self.defaults)
+        if cal_id is None:
+            raise RuntimeError(f"Failed to create default calibration for probe {probe_id}")
+        self._cal_id_cache[probe_id] = cal_id
+        return cal_id
 
-            # Ensure raw_dry and raw_wet are not equal or invalid
-            if raw_dry == raw_wet or raw_dry < 0 or raw_wet < 0:
-                raise ValueError("Invalid calibration data (raw_dry and raw_wet cannot be equal or negative).")
-
-            # Calculate moisture_pct based on the calibration
-            if raw_wet < raw_dry:
-                # Wet values are lower (inverse logic)
-                moisture_pct = (1.0 - (moisture_raw - raw_wet) / (raw_dry - raw_wet)) * 100.0
-            else:
-                # Normal logic
-                moisture_pct = ((moisture_raw - raw_wet) / (raw_dry - raw_wet)) * 100.0
-
-            # Ensure the value is within 0-100% range
-            moisture_pct = max(0.0, min(moisture_pct, 100.0))
-            return moisture_pct
+    def invalidate_calibration_cache(self, probe_id: Optional[int] = None) -> None:
+        if probe_id is None:
+            self._cal_id_cache.clear()
         else:
-            print(f"No active calibration found for probe {probe_id}")
-            return None
+            self._cal_id_cache.pop(probe_id, None)
 
-    def validate_sensor_ranges(self, probe_id: int, lux: float, rh: float, temp_c: float, moisture_raw: int) -> bool:
-        """
-        Validate if all sensor readings are within the expected ranges for the probe.
-        """
-        # Get the calibration data (lux, rh, temp ranges)
-        calibration = self.db.get_probe_calibration(probe_id)
+    # ---------- validation ----------
 
-        if calibration:
-            lux_min, lux_max = calibration["lux_min"], calibration["lux_max"]
-            rh_min, rh_max = calibration["rh_min"], calibration["rh_max"]
-            temp_min, temp_max = calibration["temp_min"], calibration["temp_max"]
-
-            # Lux range check
-            if lux < lux_min or lux > lux_max:
-                print(f"Lux reading {lux} is out of range for probe {probe_id}. Expected between {lux_min} and {lux_max}.")
-                return False
-
-            # RH range check
-            if rh < rh_min or rh > rh_max:
-                print(f"RH reading {rh} is out of range for probe {probe_id}. Expected between {rh_min} and {rh_max}.")
-                return False
-
-            # Temperature range check
-            if temp_c < temp_min or temp_c > temp_max:
-                print(f"Temperature reading {temp_c} is out of range for probe {probe_id}. Expected between {temp_min} and {temp_max}.")
-                return False
-
-            # Moisture raw range check
-            if moisture_raw < min(lux_min, lux_max) or moisture_raw > max(lux_min, lux_max):
-                print(f"Moisture reading {moisture_raw} is out of range for probe {probe_id}.")
-                return False
-
-            return True
-        else:
+    def validate_sensor_ranges(
+        self,
+        probe_id: int,
+        lux: Optional[float],
+        rh: Optional[float],
+        temp_c: Optional[float],
+        moisture_raw: Optional[int],
+    ) -> bool:
+        env = self.db.get_validation_envelope(probe_id)
+        if not env:
             print(f"No active calibration found for probe {probe_id}. Cannot validate sensor readings.")
             return False
+
+        raw_dry, raw_wet, lux_min, lux_max, rh_min, rh_max, temp_min, temp_max = env
+
+        if lux is not None and not (lux_min <= lux <= lux_max):
+            print(f"Lux {lux} out of range [{lux_min}, {lux_max}] for probe {probe_id}")
+            return False
+        if rh is not None and not (rh_min <= rh <= rh_max):
+            print(f"RH {rh} out of range [{rh_min}, {rh_max}] for probe {probe_id}")
+            return False
+        if temp_c is not None and not (temp_min <= temp_c <= temp_max):
+            print(f"Temp {temp_c} out of range [{temp_min}, {temp_max}] for probe {probe_id}")
+            return False
+        if moisture_raw is not None:
+            lo, hi = sorted((raw_dry, raw_wet))
+            if not (lo <= moisture_raw <= hi):
+                print(f"Moisture raw {moisture_raw} out of range [{lo}, {hi}] for probe {probe_id}")
+                return False
+        return True
+
+    # ---------- ingest ----------
+
+    def ingest_reading(self, line: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        pid = line.get("probe_id", line.get("plant_id"))
+        if pid is None:
+            print("Skipping record without probe_id/plant_id")
+            return None
+
+        try:
+            probe_id = int(pid)
+        except (TypeError, ValueError):
+            print(f"Skipping record with non-integer probe_id: {pid!r}")
+            return None
+
+        lux = self._maybe_float(line.get("lux"))
+        rh = self._maybe_float(line.get("rh"))
+        temp_c = self._maybe_float(line.get("temp"))  # device field name
+        moisture_raw = self._maybe_int(line.get("moisture_raw"))
+        seq = self._maybe_int(line.get("seq"))
+
+        cal_id = self.ensure_active_calibration(probe_id)
+
+        if not self.validate_sensor_ranges(probe_id, lux, rh, temp_c, moisture_raw):
+            print(f"Skipping invalid reading for probe {probe_id}")
+            return None
+
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        payload = {
+            "ts": ts,
+            "probe_id": probe_id,
+            "lux": lux,
+            "rh": rh,
+            "temp_c": temp_c,
+            "moisture_raw": moisture_raw,
+            "seq": seq,
+            "calibration_id": cal_id,
+        }
+
+        ok = self.db.insert_single_reading(payload)
+        if not ok:
+            print(f"Insert failed for probe {probe_id}")
+            return None
+
+        return payload
+
+    # ---------- helpers ----------
+
+    @staticmethod
+    def _maybe_float(v: Any) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _maybe_int(v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
 
 
 
 
 class ProbeReader:
-    def __init__(self, port: str, baud: int, db_wrapper: PlantDBWrapper, timeout: int = 2.5) -> None:
+    """
+    Thin serial reader: decode JSON and hand off to ProbeManager.
+    Manager owns calibration, validation, and DB insert.
+    """
+
+    def __init__(self, port: str, baud: int, db_wrapper: PlantDBWrapper, defaults: Dict[str, Any], timeout: float = 2.5) -> None:
         self.port = port
         self.baud = baud
         self.timeout = timeout
         self.db = db_wrapper
-        self.probe_manager = ProbeManager(db_wrapper)  # Initialize ProbeManager
-
+        self.manager = ProbeManager(db_wrapper, defaults)
         self.ser = serial.Serial(self.port, self.baud, timeout=self.timeout)
-    
-    def read_single(self):
+
+    def read_single(self) -> Optional[Dict[str, Any]]:
         raw = self.ser.readline()
         if not raw:
             return None
-
         try:
             line = json.loads(raw.decode("utf-8", "replace").strip())
         except json.JSONDecodeError:
             return None
+        return self.manager.ingest_reading(line)
 
-        probe_id = line.get("plant_id")
-        
-        # Ensure the probe has a valid calibration
-        self.probe_manager.ensure_probe_has_calibration(probe_id)
-
-        # Extract sensor readings
-        lux = line.get("lux")
-        rh = line.get("rh")
-        temp_c = line.get("temp")
-        moisture_raw = line.get("moisture_raw")
-        
-        # Validate if all readings are within valid ranges
-        if not self.probe_manager.validate_sensor_ranges(probe_id, lux, rh, temp_c, moisture_raw):
-            # If any reading is invalid, skip this reading
-            print(f"Skipping invalid reading for probe {probe_id}")
-            return None
-
-        # Calculate moisture percentage based on the moisture_raw and calibration
-        moisture_pct = self.probe_manager.calculate_moisture_pct(probe_id, moisture_raw)
-
-        # Return the data including the calculated moisture_pct
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-        return {
-            "ts": ts,
-            "probe_id": str(probe_id),
-            "lux": lux,
-            "rh": rh,
-            "temp_c": temp_c,
-            "moisture_raw": moisture_raw,
-            "moisture_pct": moisture_pct,  # Return the calculated moisture_pct
-            "seq": line.get("seq"),
-            "err": line.get("err") or "",
-        }
-
-    def stream(self):
+    def __iter__(self):
         while True:
             rec = self.read_single()
             if rec is not None:
                 yield rec
-    
-    def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-        
-    def __iter__(self):
-        return self.stream()
+
+    def close(self) -> None:
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+        except Exception:
+            pass
+
+
+
+
+

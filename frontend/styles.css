@@ -1,0 +1,64 @@
+:root { color-scheme: light dark; }
+body { font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
+h1 { margin: 0 0 12px; font-size: 20px; }
+h2 { margin: 0 0 8px; font-size: 16px; }
+
+.controls {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;
+}
+select, input { padding: 6px 8px; border-radius: 8px; border: 1px solid #ccc; }
+button { padding: 6px 10px; border-radius: 8px; border: 1px solid #999; background: transparent; cursor: pointer; }
+
+.card {
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.08);
+  background: var(--card, inherit);
+  display: flex;
+  flex-direction: column;
+  /* critical: let grid tracks shrink to avoid infinite growth */
+  min-height: 0;
+  overflow: hidden;
+  position: relative; /* helps Chart.js with responsive sizing */
+}
+
+.placeholder { border: 1px dashed rgba(127,127,127,.5); }
+
+/* ---------- Layout ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;      /* mobile default: one column */
+  gap: 20px;
+}
+
+/* Desktop/tablet: two columns; FIXED height so right side can split evenly */
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr 1fr;              /* left half, right half */
+    height: calc(100vh - 140px);                 /* <- FIXED container height */
+  }
+  .left, .right { height: 100%; min-height: 0; }
+
+  /* Right column: 3 equal rows that can shrink, no content-based growth */
+  .right {
+    display: grid;
+    grid-template-rows: repeat(3, 1fr);
+    gap: 20px;
+    min-height: 0;
+  }
+
+  /* Canvas fills its card's height (which is now stable) */
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 1 auto;
+  }
+}
+
+/* Mobile: don’t force full-viewport height; give canvases a sensible fixed height */
+@media (max-width: 899px) {
+  canvas {
+    width: 100% !important;
+    height: 240px !important;
+  }
+}

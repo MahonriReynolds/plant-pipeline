@@ -9,8 +9,11 @@ CREATE TABLE IF NOT EXISTS probes (
   label       TEXT NOT NULL,               -- e.g., "Monstera #1"
   notes       TEXT,                        -- optional probe-specific notes
   is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),  -- active flag
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')) CHECK (
-                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at) AND datetime(created_at) IS NOT NULL
+  created_at  TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at)
+                  AND datetime(created_at) IS NOT NULL
                 )
 ) STRICT;
 
@@ -33,17 +36,13 @@ CREATE TABLE IF NOT EXISTS probe_calibrations (
   temp_max    REAL NOT NULL CHECK (temp_max >= -40 AND temp_max <= 85), -- Maximum Temperature (°C)
   notes       TEXT,
   active      INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), -- active flag for current calibration
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')) CHECK (
-                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at) AND datetime(created_at) IS NOT NULL
+  created_at  TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at)
+                  AND datetime(created_at) IS NOT NULL
                 )
 ) STRICT;
-
--- Only one active calibration per probe
-CREATE UNIQUE INDEX IF NOT EXISTS ux_cal_active_per_probe
-  ON probe_calibrations(probe_id) WHERE active = 1;
-
-CREATE INDEX IF NOT EXISTS idx_cal_probe_created
-  ON probe_calibrations(probe_id, created_at);
 
 -- Only one active calibration per probe
 CREATE UNIQUE INDEX IF NOT EXISTS ux_cal_active_per_probe
@@ -56,7 +55,11 @@ CREATE INDEX IF NOT EXISTS idx_cal_probe_created
 CREATE TABLE IF NOT EXISTS readings (
   id             INTEGER PRIMARY KEY,
   ts             TEXT NOT NULL
-                  CHECK (ts = strftime('%Y-%m-%d %H:%M:%S', ts) AND datetime(ts) IS NOT NULL),  -- ISO 8601
+                  DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                  CHECK (
+                    ts = strftime('%Y-%m-%d %H:%M:%S', ts)
+                    AND datetime(ts) IS NOT NULL
+                  ),  -- ISO 8601
   probe_id       INTEGER NOT NULL
                  REFERENCES probes(id) ON DELETE RESTRICT ON UPDATE RESTRICT,  -- link to probe
 
@@ -89,30 +92,30 @@ CREATE TRIGGER IF NOT EXISTS update_moisture_pct_after_insert
 AFTER INSERT ON readings
 FOR EACH ROW
 BEGIN
-    -- Check if moisture_raw is available
-    -- and if calibration_id is provided for this reading
     UPDATE readings
-    SET moisture_pct = (
-        -- Calculate moisture_pct based on raw moisture and calibration
+    SET moisture_pct =
         CASE
-            WHEN NEW.moisture_raw IS NOT NULL AND NEW.calibration_id IS NOT NULL THEN
-                -- Get raw_dry and raw_wet from probe_calibrations using the calibration_id
-                (SELECT
+            WHEN NEW.moisture_raw IS NULL OR NEW.calibration_id IS NULL THEN NULL
+            ELSE (
+                SELECT
                     CASE
-                        WHEN raw_wet < raw_dry THEN
-                            (1.0 - (NEW.moisture_raw - raw_wet) / (raw_dry - raw_wet)) * 100.0
+                        WHEN raw_dry = raw_wet THEN NULL
                         ELSE
-                            ((NEW.moisture_raw - raw_wet) / (raw_dry - raw_wet)) * 100.0
+                            -- 0% at raw_dry, 100% at raw_wet, clamp to [0,100]
+                            CAST(
+                              MIN(100, MAX(0,
+                                ROUND( (100.0 * (raw_dry - NEW.moisture_raw)) / (raw_dry - raw_wet) )
+                              ))
+                            AS INTEGER)
                     END
                 FROM probe_calibrations
-                WHERE probe_calibrations.id = NEW.calibration_id)
-            ELSE
-                NULL  -- Set to NULL if no moisture_raw or calibration_id is available
+                WHERE id = NEW.calibration_id
+            )
         END
-    )
-    WHERE id = NEW.id;  -- Update the inserted row using its ID
+    WHERE id = NEW.id;
 END;
 
+-- ---------- Probe Alert Thresholds ----------
 CREATE TABLE IF NOT EXISTS probe_alert_thresholds (
     probe_id INTEGER PRIMARY KEY,                         -- Link to probe ID
     moisture_min INTEGER CHECK (moisture_min >= 0 AND moisture_min <= 1023),  -- Min moisture threshold (raw scale)
@@ -123,8 +126,18 @@ CREATE TABLE IF NOT EXISTS probe_alert_thresholds (
     temp_max REAL CHECK (temp_max >= -40 AND temp_max <= 85),  -- Max temperature in °C
     rh_min REAL CHECK (rh_min >= 0 AND rh_min <= 100),    -- Min humidity in percentage
     rh_max REAL CHECK (rh_max >= 0 AND rh_max <= 100),    -- Max humidity in percentage
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),  -- Timestamp of threshold creation
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))   -- Timestamp for updates
+    created_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at)
+                  AND datetime(created_at) IS NOT NULL
+                ),
+    updated_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  updated_at = strftime('%Y-%m-%d %H:%M:%S', updated_at)
+                  AND datetime(updated_at) IS NOT NULL
+                )
 ) STRICT;
 
 -- ---------- Probe Alerts Table ----------
@@ -132,12 +145,26 @@ CREATE TABLE IF NOT EXISTS probe_alerts (
     id INTEGER PRIMARY KEY,                             -- Unique ID for the alert
     probe_id INTEGER NOT NULL,                          -- Link to the probe
     type TEXT NOT NULL CHECK (type IN ('too_dry', 'too_wet', 'lux_out_of_range', 'temp_out_of_range', 'rh_out_of_range', 'lux_avg_out_of_range', 'moisture_avg_out_of_range')),
-    timestamp TEXT NOT NULL CHECK (timestamp = strftime('%Y-%m-%d %H:%M:%S', timestamp) AND datetime(timestamp) IS NOT NULL),
+    timestamp TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  timestamp = strftime('%Y-%m-%d %H:%M:%S', timestamp)
+                  AND datetime(timestamp) IS NOT NULL
+                ),
     message TEXT NOT NULL,                              -- Description of the alert
-    FOREIGN KEY(probe_id) REFERENCES probes(id) ON DELETE CASCADE,  -- Foreign key to probe table
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),  -- Timestamp of alert creation
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))   -- Timestamp for updates
+    created_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  created_at = strftime('%Y-%m-%d %H:%M:%S', created_at)
+                  AND datetime(created_at) IS NOT NULL
+                ),
+    updated_at TEXT NOT NULL
+                DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now'))
+                CHECK (
+                  updated_at = strftime('%Y-%m-%d %H:%M:%S', updated_at)
+                  AND datetime(updated_at) IS NOT NULL
+                ),
+    FOREIGN KEY(probe_id) REFERENCES probes(id) ON DELETE CASCADE  -- Foreign key to probe table
 ) STRICT;
-
 
 COMMIT;

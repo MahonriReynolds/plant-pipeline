@@ -1,7 +1,3 @@
-
-
-
-
 #include <BH1750.h>
 #include <Wire.h>
 #include "TinyDHT.h"
@@ -13,27 +9,9 @@
 DHT dht(DHTPIN, DHTTYPE);
 BH1750 lightMeter;
 
-
-const uint8_t PLANT_ID = 1;
+// Probe-related constants
+const uint8_t PROBE_ID = 1;
 uint32_t seq = 0;
-
-const int MOISTURE_RAW_DRY = 450;
-const int MOISTURE_RAW_WET = 190;
-
-float moisture_pct_from_raw(int raw) {
-  int lo = min(MOISTURE_RAW_DRY, MOISTURE_RAW_WET);
-  int hi = max(MOISTURE_RAW_DRY, MOISTURE_RAW_WET);
-  if (raw < lo) raw = lo;
-  if (raw > hi) raw = hi;
-  float span = float(hi - lo);
-  float pos = float(raw - lo);
-
-  bool wetReadsLower = (MOISTURE_RAW_WET < MOISTURE_RAW_DRY);
-  float pct = wetReadsLower ? (1.0f - pos / span) * 100.0f
-                            : (pos / span) * 100.0f;
-  return pct;
-}
-
 
 void setup() {
   Serial.begin(115200);
@@ -45,56 +23,39 @@ void setup() {
   delay(1000);
 }
 
-
 void loop() {
-  String err = "";
-
+  // Read light level from BH1750
   float lux = lightMeter.readLightLevel();
-  if (lux < 0 || lux > 300000) {
-    err += (err.length() ? "|" : "");
-    err += "BH1750";
-    lux = NAN;
-  }
-  
+
+  // Read temperature and humidity from DHT22
   int8_t rh = dht.readHumidity();
   int16_t temp = dht.readTemperature();
-  if (isnan(rh) || isnan(temp) || rh < 0 || rh > 100 || temp < -20 || temp > 70) {
-    err += (err.length() ? "|" : "");
-    err += "DHT";
-    rh = NAN; temp = NAN;
-  }
 
+  // Read moisture sensor
   int moistureRaw = analogRead(MOISTURE_PIN);
-  delay(5);
-  moistureRaw = (moistureRaw + analogRead(MOISTURE_PIN)) / 2;
-  float moisturePct = moisture_pct_from_raw(moistureRaw);
+  delay(5);  // Small delay to stabilize sensor reading (it;s analog)
+  moistureRaw = (moistureRaw + analogRead(MOISTURE_PIN)) / 2; // Averaging two samples
 
-
-  Serial.print("{\"plant_id\":");
-  Serial.print(PLANT_ID);
+  // Output the sensor data as JSON (no moisture_pct sent, only moisture_raw)
+  Serial.print("{\"probe_id\":");
+  Serial.print(PROBE_ID);  // Use 'probe_id' instead of 'plant_id'
 
   Serial.print(",\"seq\":");
   Serial.print(seq++);
 
   Serial.print(",\"lux\":");
-  if (isnan(lux)) Serial.print("null"); else Serial.print(lux, 1);
+  Serial.print(lux, 1);  // Light level (lux)
 
   Serial.print(",\"rh\":");
-  if (isnan(rh)) Serial.print("null"); else Serial.print(rh, 1);
+  Serial.print(rh, 1);  // Humidity percentage
 
   Serial.print(",\"temp\":");
-  if (isnan(temp)) Serial.print("null"); else Serial.print(temp, 1);
+  Serial.print(temp, 1);  // Temperature in Celsius
 
   Serial.print(",\"moisture_raw\":");
-  Serial.print(moistureRaw);
+  Serial.print(moistureRaw);  // Raw moisture sensor value (only)
 
-  Serial.print(",\"moisture_pct\":");
-  Serial.print(moisturePct, 1);
+  Serial.println("}");  // Closing the JSON object
 
-  Serial.print(",\"err\":\"");
-  Serial.print(err);
-  Serial.println("\"}");
-
-
-  delay(2000);
+  delay(2000);  // Delay before next reading (2 seconds)
 }

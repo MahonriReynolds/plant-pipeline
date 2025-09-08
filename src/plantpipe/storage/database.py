@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Iterable, List
 
 
-class ReadingsDBWrapper:
+class PlantDBWrapper:
     def __init__(self, path: str, db_schema: str) -> None:
         # load schema file
         schema_path = Path(db_schema)
@@ -115,21 +115,23 @@ class ReadingsDBWrapper:
         if not self.__is_valid_iso_ts(ts):
             raise ValueError(f"Invalid timestamp format: {ts!r}")
 
+        # Build the row, now excluding 'err' and 'moisture_pct'
         row = {
             "ts":            ts,
-            "plant":         self.__opt_str(payload.get("plant")),
+            "probe_id":      self.__opt_str(payload.get("probe_id")),  # Updated to "probe_id"
             "lux":           self.__opt_float(payload.get("lux")),
             "rh":            self.__opt_float(payload.get("rh")),
             "temp_c":        self.__opt_float(payload.get("temp_c")),
             "moisture_raw":  self.__opt_int(payload.get("moisture_raw")),
-            "moisture_pct":  self.__opt_float(payload.get("moisture_pct")),
             "seq":           self.__opt_int(payload.get("seq")),
-            "err":           self.__opt_str(payload.get("err")) or "",  # force string; empty OK
+            "calibration_id": self.__opt_int(payload.get("calibration_id")),  # Calibration ID if available
         }
 
-        if not any(row[k] is not None for k in ("lux", "rh", "temp_c", "moisture_raw", "moisture_pct")):
+        if not any(row[k] is not None for k in ("lux", "rh", "temp_c", "moisture_raw")):
             raise ValueError("At least one measurement must be present.")
         return row
+
+
 
     # --------------- public: inserts ---------------
 
@@ -137,19 +139,21 @@ class ReadingsDBWrapper:
         if not self.__table_exists("readings"):
             return False
         try:
-            row = self.__build_row(payload)  # raises on bad payload
-            self.conn.execute(
-                """
-                INSERT INTO readings
-                  (ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
-                VALUES
-                  (:ts, :plant, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
-                """,
-                row,
-            )
+            # Build the row from the payload
+            row = self.__build_row(payload)
+
+            # Insert the reading into the 'readings' table
+            self.conn.execute("""
+                INSERT INTO readings (ts, probe_id, lux, rh, temp_c, moisture_raw, seq, calibration_id)
+                VALUES (:ts, :probe_id, :lux, :rh, :temp_c, :moisture_raw, :seq, :calibration_id)
+            """, row)
+
             return True  # autocommit persists
-        except Exception:
+        except Exception as e:
+            print(f"Error inserting reading: {e}")
             return False
+
+
 
     def insert_batch_readings(self, payloads: Iterable[Dict[str, Any]]) -> bool:
         if not self.__table_exists("readings"):
@@ -161,10 +165,8 @@ class ReadingsDBWrapper:
             self.conn.execute("BEGIN")
             self.conn.executemany(
                 """
-                INSERT INTO readings
-                  (ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err)
-                VALUES
-                  (:ts, :plant, :lux, :rh, :temp_c, :moisture_raw, :moisture_pct, :seq, :err)
+                INSERT INTO readings (ts, probe_id, lux, rh, temp_c, moisture_raw, seq, calibration_id)
+                VALUES (:ts, :probe_id, :lux, :rh, :temp_c, :moisture_raw, :seq, :calibration_id)
                 """,
                 rows,
             )
@@ -175,6 +177,74 @@ class ReadingsDBWrapper:
                 self.conn.execute("ROLLBACK")
             finally:
                 return False
+    
+
+    def insert_alert(self, probe_id: int, alert_type: str, message: str) -> bool:
+        if not self.__table_exists("probe_alerts"):
+            return False
+        try:
+            # Insert new alert
+            self.conn.execute("""
+                INSERT INTO probe_alerts (probe_id, type, timestamp, message)
+                VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now'), ?)
+            """, (probe_id, alert_type, message))
+            return True
+        except Exception as e:
+            print(f"Error inserting alert: {e}")
+            return False
+
+    def set_active_calibration(self, probe_id: int, raw_dry: int, raw_wet: int, notes: Optional[str] = None) -> bool:
+        if not self.__table_exists("probe_calibrations"):
+            return False
+
+        try:
+            # Deactivate the previous active calibration for the probe (if any)
+            self.conn.execute("""
+                UPDATE probe_calibrations
+                SET active = 0
+                WHERE probe_id = ? AND active = 1
+            """, (probe_id,))
+
+            # Insert the new calibration and set it as active
+            self.conn.execute("""
+                INSERT INTO probe_calibrations (probe_id, raw_dry, raw_wet, notes, active)
+                VALUES (?, ?, ?, ?, 1)
+            """, (probe_id, raw_dry, raw_wet, notes))
+
+            return True
+        except Exception as e:
+            print(f"Error setting active calibration: {e}")
+            return False
+
+    def set_probe_alert_thresholds(
+        self, probe_id: int, moisture_min: Optional[int], moisture_max: Optional[int],
+        lux_min: Optional[float], lux_max: Optional[float],
+        temp_min: Optional[float], temp_max: Optional[float],
+        rh_min: Optional[float], rh_max: Optional[float]
+    ) -> bool:
+        if not self.__table_exists("probe_alert_thresholds"):
+            return False
+        try:
+            # Insert or update the threshold settings for the probe
+            self.conn.execute("""
+                INSERT INTO probe_alert_thresholds (probe_id, moisture_min, moisture_max, lux_min, lux_max, temp_min, temp_max, rh_min, rh_max)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(probe_id) DO UPDATE SET
+                    moisture_min = COALESCE(EXCLUDED.moisture_min, moisture_min),
+                    moisture_max = COALESCE(EXCLUDED.moisture_max, moisture_max),
+                    lux_min = COALESCE(EXCLUDED.lux_min, lux_min),
+                    lux_max = COALESCE(EXCLUDED.lux_max, lux_max),
+                    temp_min = COALESCE(EXCLUDED.temp_min, temp_min),
+                    temp_max = COALESCE(EXCLUDED.temp_max, temp_max),
+                    rh_min = COALESCE(EXCLUDED.rh_min, rh_min),
+                    rh_max = COALESCE(EXCLUDED.rh_max, rh_max)
+            """, (probe_id, moisture_min, moisture_max, lux_min, lux_max, temp_min, temp_max, rh_min, rh_max))
+            return True
+        except Exception as e:
+            print(f"Error inserting/updating alert thresholds: {e}")
+            return False
+
+
 
     # --------------- public: reads / health ---------------
 
@@ -184,7 +254,7 @@ class ReadingsDBWrapper:
         if oldest_first:
             sql = """
                 SELECT * FROM (
-                    SELECT id, ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                    SELECT id, ts, probe_id, lux, rh, temp_c, moisture_raw, moisture_pct, seq
                     FROM readings
                     ORDER BY ts DESC, id DESC
                     LIMIT ?
@@ -193,13 +263,66 @@ class ReadingsDBWrapper:
             """
         else:
             sql = """
-                SELECT id, ts, plant, lux, rh, temp_c, moisture_raw, moisture_pct, seq, err
+                SELECT id, ts, probe_id, lux, rh, temp_c, moisture_raw, moisture_pct, seq
                 FROM readings
                 ORDER BY ts DESC, id DESC
                 LIMIT ?
             """
         cur = self.conn.execute(sql, (n,))
         return [dict(row) for row in cur.fetchall()]
+    
+    def get_probe_calibration(self, probe_id: int) -> Optional[Dict[str, float]]:
+        """
+        Retrieve the calibration data for a probe, including lux, humidity, and temperature ranges.
+        """
+        query = """
+        SELECT lux_min, lux_max, rh_min, rh_max, temp_min, temp_max
+        FROM probe_calibrations
+        WHERE probe_id = ? AND active = 1
+        """
+        calibration = self.conn.execute(query, (probe_id,)).fetchone()
+
+        if calibration:
+            # Return the calibration values as a dictionary
+            return {
+                "lux_min": calibration["lux_min"],
+                "lux_max": calibration["lux_max"],
+                "rh_min": calibration["rh_min"],
+                "rh_max": calibration["rh_max"],
+                "temp_min": calibration["temp_min"],
+                "temp_max": calibration["temp_max"]
+            }
+        else:
+            print(f"No active calibration found for probe {probe_id}.")
+            return None
+    
+    def get_probe_alerts(self, probe_id: int, limit: int = 10) -> List[Dict[str, Any]]:
+        if not self.__table_exists("probe_alerts"):
+            return []
+        query = """
+            SELECT id, probe_id, type, timestamp, message
+            FROM probe_alerts
+            WHERE probe_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        cur = self.conn.execute(query, (probe_id, limit))
+        return [dict(row) for row in cur.fetchall()]
+
+    def get_probe_alert_thresholds(self, probe_id: int) -> Optional[Dict[str, Any]]:
+        if not self.__table_exists("probe_alert_thresholds"):
+            return None
+        query = """
+            SELECT moisture_min, moisture_max, lux_min, lux_max, temp_min, temp_max, rh_min, rh_max
+            FROM probe_alert_thresholds
+            WHERE probe_id = ?
+        """
+        cur = self.conn.execute(query, (probe_id,))
+        result = cur.fetchone()
+        if result:
+            return dict(result)
+        return None
+
 
     def health_check(self) -> bool:
         try:

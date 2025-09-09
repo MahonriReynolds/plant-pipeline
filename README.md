@@ -57,7 +57,7 @@ http://localhost:8000/frontend
 
 **Expected result:** a live dashboard with soil moisture, lux, RH, and temperature graphs updating \~every 2 seconds.
 
-⚠️ **Windows:** instead of `socat`, use a virtual COM port pair tool (e.g., com0com). Point `fake_probe.py` at `COM5` and the ingestor at `COM6`.
+⚠️ **Windows:** instead of `socat`, use a virtual COM port pair tool (e.g., com0com). Point `arduino_mimic.py` at `COM5` and the ingestor at `COM6`.
 
 ---
 

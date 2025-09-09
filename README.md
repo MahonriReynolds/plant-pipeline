@@ -2,6 +2,9 @@
 # Plant Pipeline 🌱
 End-to-end IoT pipeline that streams plant sensor data (light, humidity, temperature, soil moisture) into a database and visualizes it in real time—**hardware optional** thanks to a probe simulator.
 
+(Full development history can be found in the branches, with versions marked by tags on main)
+
+
 ![Dashboard](assets/v1-dashboard.png)
 
 ---

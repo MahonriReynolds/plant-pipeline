@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Plant Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+</head>
+<body>
+  <h1>Plant Dashboard</h1>
+
+  <div class="controls">
+    <label>Probe:</label>
+    <select id="probeSelect"></select>
+
+    <label>Since (hours):</label>
+    <input id="sinceHours" type="number" value="24" min="1" max="168" />
+
+    <label>Auto-refresh:</label>
+    <input id="autoRefresh" type="checkbox" checked />
+
+    <label>Every (s):</label>
+    <input id="periodSec" type="number" value="5" min="2" max="120" />
+
+    <button id="refreshBtn">Refresh</button>
+  </div>
+
+  <!-- New two-column layout -->
+  <div class="layout">
+    <div class="left">
+      <div class="card placeholder">
+        <!-- empty box for now -->
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="card">
+        <h2>Soil Moisture (%)</h2>
+        <canvas id="moistureChart"></canvas>
+      </div>
+      <div class="card">
+        <h2>Lux</h2>
+        <canvas id="luxChart"></canvas>
+      </div>
+      <div class="card">
+        <h2>RH (%) & Temperature (°C)</h2>
+        <canvas id="climateChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

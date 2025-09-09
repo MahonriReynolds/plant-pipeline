@@ -2,7 +2,14 @@
 # Plant Pipeline 🌱
 End-to-end IoT pipeline that streams plant sensor data (light, humidity, temperature, soil moisture) into a database and visualizes it in real time—**hardware optional** thanks to a probe simulator.
 
+📌 Current version: [v1](https://github.com/MahonriReynolds/plant-pipeline/releases/tag/v1.0.0)  
 (Full development history can be found in the branches, with versions marked by tags on main)
+
+## Features
+* Reproducible fake probe demo (no hardware needed)
+* Arduino ingestion → SQLite storage → FastAPI API → live dashboard
+* Real-time graphs updating every 2s
+* Clear roadmap: alerts, ML predictions, wireless hardware
 
 
 ![Dashboard](assets/v1-dashboard.png)
@@ -107,99 +114,42 @@ flowchart LR
 
 ```
 .
-├── arduino
+├── arduino/                 # Arduino sketch for the probe
 │   └── plant_probe.ino
-├── assets
-│   ├── plant-with-probe.jpg
+├── assets/                  # Screenshots / photos / diagrams
 │   ├── v1-dashboard.png
+│   ├── plant-with-probe.jpg
 │   └── wiring-diagram.jpg
-├── build
-│   ├── bdist.linux-x86_64
-│   └── lib
-│       └── plantpipe
-│           ├── api
-│           │   ├── api_server.py
-│           │   └── __init__.py
-│           ├── config.py
-│           ├── core
-│           │   ├── __init__.py
-│           │   ├── logger.py
-│           │   └── pipe.py
-│           ├── __init__.py
-│           ├── input
-│           │   ├── __init__.py
-│           │   └── serial_ingestor.py
-│           ├── monitoring
-│           │   ├── __init__.py
-│           │   └── sentinel.py
-│           ├── processing
-│           │   └── __init__.py
-│           └── storage
-│               ├── database.py
-│               └── __init__.py
-├── data
-│   └── plant.db
-├── docs
+├── docs/
 │   └── v1-plan.md
-├── frontend
-│   ├── app.js
+├── frontend/                # Lightweight dashboard
 │   ├── index.html
+│   ├── app.js
 │   └── styles.css
-├── LICENSE
-├── pyproject.toml
-├── README.md
-├── requirements.txt
-├── scripts
+├── scripts/                 # Dev / demo helpers (fake probe, db peek)
 │   ├── arduino_mimic.py
 │   └── database_peek.py
-├── sql
+├── sql/                     # Schema / migrations
 │   └── 001_init.sql
-├── src
-│   ├── plantpipe
-│   │   ├── api
-│   │   │   ├── api_server.py
-│   │   │   ├── __init__.py
-│   │   │   └── __pycache__
-│   │   │       ├── api_server.cpython-312.pyc
-│   │   │       └── __init__.cpython-312.pyc
-│   │   ├── config.py
-│   │   ├── core
-│   │   │   ├── __init__.py
-│   │   │   ├── logger.py
-│   │   │   ├── pipe.py
-│   │   │   └── __pycache__
-│   │   │       ├── __init__.cpython-312.pyc
-│   │   │       └── pipe.cpython-312.pyc
-│   │   ├── __init__.py
-│   │   ├── input
-│   │   │   ├── __init__.py
-│   │   │   ├── __pycache__
-│   │   │   │   ├── __init__.cpython-312.pyc
-│   │   │   │   └── serial_ingestor.cpython-312.pyc
-│   │   │   └── serial_ingestor.py
-│   │   ├── monitoring
-│   │   │   ├── __init__.py
-│   │   │   └── sentinel.py
-│   │   ├── processing
-│   │   │   ├── __init__.py
-│   │   │   └── __pycache__
-│   │   │       └── __init__.cpython-312.pyc
-│   │   ├── __pycache__
-│   │   │   └── __init__.cpython-312.pyc
-│   │   └── storage
-│   │       ├── database.py
-│   │       ├── __init__.py
-│   │       └── __pycache__
-│   │           ├── database.cpython-312.pyc
-│   │           └── __init__.cpython-312.pyc
-│   └── plantpipe.egg-info
-│       ├── dependency_links.txt
-│       ├── PKG-INFO
-│       ├── SOURCES.txt
-│       └── top_level.txt
-└── tests
+├── src/plantpipe/           # Ingest → store → API core
+│   ├── api/
+│   │   └── api_server.py
+│   ├── core/
+│   │   ├── logger.py
+│   │   └── pipe.py
+│   ├── input/
+│   │   └── serial_ingestor.py
+│   ├── monitoring/
+│   │   └── sentinel.py
+│   ├── storage/
+│   │   └── database.py
+│   └── config.py
+├── tests/
+├── LICENSE
+├── pyproject.toml
+├── requirements.txt
+└── README.md
 
-34 directories, 58 files
 ```
 
 ---

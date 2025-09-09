@@ -180,6 +180,7 @@ flowchart LR
 
 * Explore **wireless probe design** (structural hardware changes).
 * Multi-probe support (track multiple plants).
+* Containerize for cross-platoform deployment. 
 
 ---
 

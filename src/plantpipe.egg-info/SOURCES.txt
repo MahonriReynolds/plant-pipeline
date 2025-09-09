@@ -17,8 +17,5 @@ src/plantpipe/input/serial_ingestor.py
 src/plantpipe/monitoring/__init__.py
 src/plantpipe/monitoring/sentinel.py
 src/plantpipe/processing/__init__.py
-src/plantpipe/processing/transformer.py
 src/plantpipe/storage/__init__.py
 src/plantpipe/storage/database.py
-src/plantpipe/ui/__init__.py
-src/plantpipe/ui/dashboard.py

@@ -75,17 +75,16 @@ Hand-drawn wiring diagram:
 ## Architecture (at a glance)
 
 ```mermaid
-graph LR
-    A[Arduino Probe<br/>(lux/RH/Temp/moisture)] -- JSON @2s --> B[Serial]
+flowchart LR
+    A[Arduino probe\n(lux, RH/Temp, moisture)] -->|JSON @ 2s| B[Serial]
     subgraph Runtime
-    B --> C[Python Ingestor<br/>parse & validate]
-    C --> D[(SQLite DB)]
-    D --> E[FastAPI]
-    E --> F[Frontend Dashboard<br/>(HTML/CSS/JS)]
+        B --> C[Python ingestor\n(parse & validate)]
+        C --> D[(SQLite DB)]
+        D --> E[FastAPI]
+        E --> F[Frontend dashboard\n(HTML/CSS/JS)]
     end
-
     %% Dev-only path
-    A2[Fake Probe<br/>(oscillating values)] -- serial -> B
+    A2[Fake probe\n(oscillating values)] --> B
 ```
 
 ---
@@ -105,19 +104,99 @@ graph LR
 
 ```
 .
-├─ arduino/           # Arduino sketch for the probe (lux, RH/Temp, moisture)
-├─ src/
-│  ├─ ingest.py       # Serial listener -> SQLite writer
-│  ├─ api.py          # FastAPI app (serves /frontend, exposes read endpoints)
-│  └─ ...
-├─ frontend/          # HTML/CSS/JS dashboard
-├─ scripts/
-│  └─ fake_probe.py   # Simulator that writes oscillating JSON to serial
-├─ sql/               # database schema / migrations
-├─ assets/            # screenshots, diagrams, photos
-├─ docs/              # notes, references
-├─ pyproject.toml
-└─ README.md
+├── arduino
+│   └── plant_probe.ino
+├── assets
+│   ├── plant-with-probe.jpg
+│   ├── v1-dashboard.png
+│   └── wiring-diagram.jpg
+├── build
+│   ├── bdist.linux-x86_64
+│   └── lib
+│       └── plantpipe
+│           ├── api
+│           │   ├── api_server.py
+│           │   └── __init__.py
+│           ├── config.py
+│           ├── core
+│           │   ├── __init__.py
+│           │   ├── logger.py
+│           │   └── pipe.py
+│           ├── __init__.py
+│           ├── input
+│           │   ├── __init__.py
+│           │   └── serial_ingestor.py
+│           ├── monitoring
+│           │   ├── __init__.py
+│           │   └── sentinel.py
+│           ├── processing
+│           │   └── __init__.py
+│           └── storage
+│               ├── database.py
+│               └── __init__.py
+├── data
+│   └── plant.db
+├── docs
+│   └── v1-plan.md
+├── frontend
+│   ├── app.js
+│   ├── index.html
+│   └── styles.css
+├── LICENSE
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── scripts
+│   ├── arduino_mimic.py
+│   └── database_peek.py
+├── sql
+│   └── 001_init.sql
+├── src
+│   ├── plantpipe
+│   │   ├── api
+│   │   │   ├── api_server.py
+│   │   │   ├── __init__.py
+│   │   │   └── __pycache__
+│   │   │       ├── api_server.cpython-312.pyc
+│   │   │       └── __init__.cpython-312.pyc
+│   │   ├── config.py
+│   │   ├── core
+│   │   │   ├── __init__.py
+│   │   │   ├── logger.py
+│   │   │   ├── pipe.py
+│   │   │   └── __pycache__
+│   │   │       ├── __init__.cpython-312.pyc
+│   │   │       └── pipe.cpython-312.pyc
+│   │   ├── __init__.py
+│   │   ├── input
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   └── serial_ingestor.cpython-312.pyc
+│   │   │   └── serial_ingestor.py
+│   │   ├── monitoring
+│   │   │   ├── __init__.py
+│   │   │   └── sentinel.py
+│   │   ├── processing
+│   │   │   ├── __init__.py
+│   │   │   └── __pycache__
+│   │   │       └── __init__.cpython-312.pyc
+│   │   ├── __pycache__
+│   │   │   └── __init__.cpython-312.pyc
+│   │   └── storage
+│   │       ├── database.py
+│   │       ├── __init__.py
+│   │       └── __pycache__
+│   │           ├── database.cpython-312.pyc
+│   │           └── __init__.cpython-312.pyc
+│   └── plantpipe.egg-info
+│       ├── dependency_links.txt
+│       ├── PKG-INFO
+│       ├── SOURCES.txt
+│       └── top_level.txt
+└── tests
+
+34 directories, 58 files
 ```
 
 ---

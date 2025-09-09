@@ -76,15 +76,15 @@ Hand-drawn wiring diagram:
 
 ```mermaid
 flowchart LR
-    A[Arduino probe\n(lux, RH/Temp, moisture)] -->|JSON @ 2s| B[Serial]
+    A["Arduino probe"] -->|JSON every 2s| B["Serial"]
     subgraph Runtime
-        B --> C[Python ingestor\n(parse & validate)]
-        C --> D[(SQLite DB)]
-        D --> E[FastAPI]
-        E --> F[Frontend dashboard\n(HTML/CSS/JS)]
+        B --> C["Python ingestor"]
+        C --> D["SQLite database"]
+        D --> E["FastAPI API"]
+        E --> F["Frontend dashboard"]
     end
-    %% Dev-only path
-    A2[Fake probe\n(oscillating values)] --> B
+    A2["Fake probe"] --> B
+
 ```
 
 ---

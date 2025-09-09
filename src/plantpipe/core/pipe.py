@@ -11,7 +11,8 @@ PROBE_PORT = "/dev/ttyUSB0"
 BAUD = 115200
 API_HOST = "127.0.0.1"
 API_PORT = 8000
-RUN_SECONDS = 3600
+FRONTEND_ASSETS = "./frontend"
+RUN_SECONDS = 0 # set to non-zero value to set timer
 START_API = True
 
 HARD_CODED_CALIBRATION = {
@@ -31,7 +32,7 @@ def main():
 
     api: Optional[PlantAPI] = None
     if START_API:
-        api = PlantAPI(db=db, host=API_HOST, port=API_PORT)
+        api = PlantAPI(db=db, frontend=FRONTEND_ASSETS, host=API_HOST, port=API_PORT)
         api.start()
         print(f"API at http://{API_HOST}:{API_PORT}/frontend")
 
@@ -49,8 +50,9 @@ def main():
             last = db.get_last_readings(1, oldest_first=False)
             if last:
                 print("Last reading:", last[0])
-            if time.time() - start > RUN_SECONDS:
-                break
+            if RUN_SECONDS:
+                if time.time() - start > RUN_SECONDS:
+                    break
     finally:
         try:
             reader.close()

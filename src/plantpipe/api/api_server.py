@@ -14,8 +14,12 @@ Metric = Literal["moisture_pct", "lux", "rh", "temp_c"]
 TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 class PlantAPI:
-    def __init__(self, db: PlantDBWrapper, host: str = "127.0.0.1", port: int = 8000):
+    def __init__(self, db: PlantDBWrapper, frontend: str, host: str = "127.0.0.1", port: int = 8000):
         self.db = db
+        self.frontend = Path(frontend).expanduser().resolve()
+        if not self.frontend.exists():
+            raise RuntimeError(f"Frontend folder not found at {self.frontend}")
+
         self.host = host
         self.port = port
         self.app = self._build_app()
@@ -63,11 +67,7 @@ class PlantAPI:
         # project/
         #   frontend/           <-- your static UI files live here
         #   src/plantpipe/api/api_server.py
-        frontend_path = Path(__file__).resolve().parents[3] / "frontend"
-        if not frontend_path.exists():
-            # If your structure differs, adjust this path calculation.
-            raise RuntimeError(f"Frontend folder not found at {frontend_path}")
-        app.mount("/frontend", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+        app.mount("/frontend", StaticFiles(directory=str(self.frontend), html=True), name="frontend")
 
         # --- API endpoints ---
         @app.get("/api/health")

@@ -31,7 +31,7 @@ Usage
     python serial_ingestor.py --port /dev/pts/3 --db data/plant.db --print
 
 # 3. Start the fake Arduino on the other:
-    python arduino_mimic.py --port /dev/pts/4 --interval 2
+    python arduino_mimic.py --port /dev/pts/4 --baud 115200 --interval 2 --probe-id 1
 
 # 4. Observe console output (if --print enabled) and inspect DB:
     sqlite3 plant.db "SELECT * FROM readings LIMIT 5;"
@@ -44,19 +44,6 @@ Notes
 """
 
 
-
-
-
-
-
-#!/usr/bin/env python3
-"""
-Fake Arduino plant sensor writer.
-
-Usage:
-  python arduino_mimic.py --port /dev/pts/4 --baud 115200
-"""
-
 import argparse
 import json
 import math
@@ -66,12 +53,15 @@ import time
 
 import serial  # pip install pyserial
 
+
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True, help="Serial port to write to (the 'other side' of the PTY pair)")
     ap.add_argument("--baud", type=int, default=115200, help="Baud rate (default 115200)")
     ap.add_argument("--interval", type=float, default=2.0, help="Seconds between messages")
+    ap.add_argument("--probe-id", type=int, default=1, help="Probe ID to include in output JSON")
     return ap.parse_args()
+
 
 def main():
     args = parse_args()
@@ -79,35 +69,33 @@ def main():
 
     seq = 0
     t0 = time.time()
-    plant_id = 1
 
     try:
         while True:
             elapsed = time.time() - t0
+
             # Smooth oscillations
-            lux = 200 + 100 * math.sin(elapsed / 30.0)         # lux cycles every ~3min
-            rh = 50 + 20 * math.sin(elapsed / 60.0)            # humidity slower drift
-            temp = 22 + 3 * math.sin(elapsed / 120.0)          # temp very slow cycle
+            lux = 200 + 100 * math.sin(elapsed / 30.0)          # lux cycles every ~3min
+            rh = 50 + 20 * math.sin(elapsed / 60.0)             # humidity slower drift
+            temp = 22 + 3 * math.sin(elapsed / 120.0)           # temp very slow cycle
             moisture_raw = 320 + int(30 * math.sin(elapsed / 15.0))
-            moisture_pct = 100.0 - (moisture_raw - 190) / (450 - 190) * 100
 
             # Add a little noise
             lux += random.uniform(-5, 5)
             rh += random.uniform(-2, 2)
             temp += random.uniform(-0.5, 0.5)
-            moisture_pct += random.uniform(-1, 1)
 
+            # Build ONLY the fields the ingestor reads
             obj = {
-                "plant_id": plant_id,
-                "seq": seq,
-                "lux": round(lux, 1),
-                "rh": round(rh, 1),
-                "temp": round(temp, 1),
-                "moisture_raw": moisture_raw,
-                "moisture_pct": round(moisture_pct, 1),
-                "err": ""
+                "probe_id": int(args.probe_id),
+                "seq": int(seq),
+                "lux": round(float(lux), 1),
+                "rh": round(float(rh), 1),
+                "temp": round(float(temp), 1),        # ingestor maps "temp" -> temp_c
+                "moisture_raw": int(moisture_raw),
             }
-            line = json.dumps(obj) + "\n"
+
+            line = json.dumps(obj, separators=(",", ":")) + "\n"
             ser.write(line.encode("utf-8"))
             ser.flush()
 
@@ -119,13 +107,14 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        ser.close()
+        try:
+            ser.close()
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 

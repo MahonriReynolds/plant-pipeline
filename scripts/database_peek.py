@@ -7,8 +7,8 @@ import sqlite3
 import pandas as pd
 from pathlib import Path
 
-DB_PATH = Path("data/readings.db")
-OUT_CSV = Path("data/readings_peek.csv")
+DB_PATH = Path("data/plant.db")
+OUT_CSV = Path("data/plant_peek.csv")
 
 def main():
     if not DB_PATH.exists():

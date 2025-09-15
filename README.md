@@ -2,8 +2,8 @@
 
 
 <p align="center">
-  <img src="assets/v1-dashboard.png" alt="Dashboard" height="350"/>
-  <img src="assets/plant-with-probe.jpg" alt="Probe in plant" height="350"/>
+  <img src="assets/v1-dashboard.png" alt="Dashboard" height="300"/>
+  <img src="assets/plant-with-probe.jpg" alt="Probe in plant" height="300"/>
 </p>
 
 
